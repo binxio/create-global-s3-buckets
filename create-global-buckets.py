@@ -10,9 +10,12 @@ from botocore.exceptions import ClientError
 parser = argparse.ArgumentParser(description='create buckets in all regions')
 parser.add_argument("--bucket-prefix", "-b", required=True, dest="bucket_prefix",
                     help="to use for bucket in all regions", metavar="STRING")
-parser.add_argument("--origin-region", "-o", dest="origin_region", default='eu-central-1', help='for replication', metavar="STRING")
+parser.add_argument("--source-region", "-o", dest="origin_region", default='eu-central-1', help='for replication', metavar="STRING")
+parser.add_argument("--target-region", "-t", dest="target_region", default='eu-west-1', help='for replication', metavar="STRING")
 parser.add_argument("--profile", "-p", dest="aws_profile", help="AWS profile to use", metavar="STRING")
 parser.add_argument("--destroy", dest="destroy", action="store_true", help="all s3 buckets", default=False)
+parser.add_argument("--destroy-replication", dest="destroy_replication", action="store_true", help="from the buckets", default=False)
+parser.add_argument("--with-replication", dest="with_replication", action="store_true", help="on the buckets", default=False)
 
 options = parser.parse_args()
 bucket_prefix = options.bucket_prefix
@@ -273,33 +276,39 @@ class ReplicationSetup(object):
 		sys.stderr.write('INFO: replication configuration on "%s" already exists.\n' % self.source_bucket)
 
     def delete_bucket_replication(self, bucket_name, region):
-	sys.stderr.write('INFO: disabling versioning and replication on bucket %s\n' % self.source_bucket)
+	sys.stderr.write('INFO: disabling versioning and replication on bucket %s\n' % bucket_name)
 	if bucket_exists(bucket_name, region):
 		get_s3(region).delete_bucket_replication(Bucket=bucket_name)
 		get_s3(region).put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={'Status': 'Suspended'})
 
 
-    def setup(self):
+    def setup(self, with_replication=False):
 	create_bucket_if_not_exists(self.source_bucket, self.source_region)
 	create_bucket_if_not_exists(self.target_bucket, self.target_region)
-	self.create_iam_role()
-	self.create_policy()
-	self.add_bucket_replication()
+	if with_replication:
+		self.create_iam_role()
+		self.create_policy()
+		self.add_bucket_replication()
 
     def destroy(self):
-        
+	self.destroy_replication()
+
+	if bucket_exists(self.source_bucket, self.source_region):
+		destroy_bucket(self.source_bucket, self.source_region)
+
+	if bucket_exists(self.target_bucket, self.target_region):
+		destroy_bucket(self.target_bucket, self.target_region)
+
+    def destroy_replication(self):
 	if bucket_exists(self.source_bucket, self.source_region):
 		self.delete_bucket_replication(self.source_bucket, self.source_region)
-		destroy_bucket(self.source_bucket, self.source_region)
 	else:
 		sys.stderr.write('INFO: bucket %s no longer exists\n' % self.source_bucket)
 
 	if bucket_exists(self.target_bucket, self.target_region):
 		self.delete_bucket_replication(self.target_bucket, self.target_region)
-		destroy_bucket(self.target_bucket, self.target_region)
 	else:
 		sys.stderr.write('INFO: bucket %s no longer exists\n' % self.target_bucket)
-
 	self.destroy_role()
 	self.destroy_policy()
 
@@ -312,9 +321,12 @@ if __name__ == '__main__':
 	    configurations.append(ReplicationSetup(bucket_prefix, src_region, target_region, account_id))
 	    src_region = target_region
 
-	if not options.destroy:
-	    for configuration in configurations:
-		configuration.setup()
-	else:
+	if options.destroy:
 	    for configuration in configurations:
 		configuration.destroy()
+	elif  options.destroy_replication:
+	    for configuration in configurations:
+		configuration.destroy_replication()
+	else:
+	    for configuration in configurations:
+		configuration.setup(with_replication=options.with_replication)
