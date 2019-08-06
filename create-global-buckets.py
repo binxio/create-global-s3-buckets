@@ -67,11 +67,13 @@ if options.aws_profile:
 session = boto3.Session(**kwargs)
 
 regions = list(
-    map(lambda r: r["RegionName"], session.client("ec2").describe_regions()["Regions"])
+    map(lambda r: r["RegionName"], session.client("ec2").describe_regions(AllRegions=True)["Regions"])
 )
-s3clients = {region: session.client("s3", region_name=region) for region in regions}
-regions = sorted(list(filter(lambda r: r != origin_region, regions)))
 
+regions = list(sorted(filter(lambda r: r != origin_region, regions)))
+s3clients = {region: session.client("s3", region_name=region) for region in regions}
+regions = sorted(list(filter(lambda r: r != origin_region and not r.startswith('us-gov'), regions)))
+print(regions)
 iam = session.client("iam")
 
 
